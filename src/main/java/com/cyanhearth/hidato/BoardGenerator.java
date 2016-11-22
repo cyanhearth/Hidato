@@ -16,13 +16,12 @@ import java.util.concurrent.ThreadLocalRandom;
 /** This class will generate Hidato puzzles and solutions **/
 public class BoardGenerator {
 	
-	public int count;		// number of moves made
+	public int count = 0;		// number of moves made
 	public int noOfSolutions;  // number of solutions found
 	
-		// list of numbers on board at the game start
-	private ArrayList<String> solutions = new ArrayList<>();
-	
 	private static final int START_NUMBER = 1;
+	private static final double MAX_TO_REMOVE = 0.7;
+	private static final double MIN_TO_REMOVE = 0.5;
 	
 	// possible moves
 	private static final Point[] MOVES = {
@@ -36,10 +35,49 @@ public class BoardGenerator {
 			new Point(-1, 1)		
 	};
 	
-	public ArrayList<ArrayList<Integer>> readBoard() {
+	public ArrayList<ArrayList<ArrayList<Integer>>> readBoards(String path) {
+		ArrayList<ArrayList<ArrayList<Integer>>> puzzles = new ArrayList<>();
 		ArrayList<ArrayList<Integer>> board = new ArrayList<>();
 		
-		File file = new File("D:\\workspace\\Hidato\\src\\main\\resources\\file\\testempty.txt");
+		File file = new File(path);
+		
+		try {
+			Scanner sc = new Scanner(file);
+			
+			while (sc.hasNextLine()) {
+				ArrayList<Integer> row = new ArrayList<>();
+				String line = sc.nextLine();
+				if (line.equals("")) {
+					puzzles.add(board);
+					System.out.println("added");
+					board.clear();
+					continue;
+				}
+				Scanner lineScanner = new Scanner(line);
+				
+				while (lineScanner.hasNext()) {
+					row.add(Integer.valueOf(lineScanner.next()));
+				}
+				
+				board.add(row);
+				
+				lineScanner.close();
+			}
+			
+			sc.close();
+			
+		}
+		catch (FileNotFoundException e) {
+			e.printStackTrace();
+		}
+		
+		return puzzles;
+	}
+	
+	public ArrayList<ArrayList<Integer>> readBoard(String path) {
+		ArrayList<ArrayList<Integer>> board = new ArrayList<>();
+		
+		File file = new File(path);
 		
 		try {
 			Scanner sc = new Scanner(file);
@@ -145,9 +183,11 @@ public class BoardGenerator {
 	 * @param limit: stop finding solutions if the limit is reached
 	 * @return boolean: true if the puzzle is solved, false if not
 	 */
-	public boolean solve(Point pos, ArrayList<ArrayList<Integer>> board, int spaces, 
-			ArrayList<Integer> startConfig, int limit) {
+	private boolean solve(Point pos, ArrayList<ArrayList<Integer>> board, int spaces, 
+			ArrayList<Integer> startConfig, int limit, ArrayList<ArrayList<ArrayList<Integer>>> solutions) {
 		count++;
+		if (limit > 0)
+			shuffleArray(MOVES);
 		if (board.get(pos.y).get(pos.x) == 0) {
 			if (startConfig.contains(count)) {
 				count--;
@@ -158,11 +198,10 @@ public class BoardGenerator {
 		
 		if (count == spaces) {
 			noOfSolutions++;
-			solutions.add(toString(board));
-			printBoard(board);
+			if (solutions != null)
+				solutions.add(board);
 
 		}
-		shuffleArray(MOVES);
 		for (Point move : MOVES) {
 			int x = pos.x + move.x;
 			int y = pos.y + move.y;
@@ -177,7 +216,7 @@ public class BoardGenerator {
 				}
 			}
 			
-			solve(new Point(x, y), board, spaces, startConfig, limit);
+			solve(new Point(x, y), board, spaces, startConfig, limit, solutions);
 			if (noOfSolutions >= limit && limit > 0)
 				return true;
 		}
@@ -188,13 +227,29 @@ public class BoardGenerator {
 		count--;
 		return noOfSolutions > 0;
 	}
-	static void shuffleArray(Point[] ar) {
+	
+	private boolean solve(ArrayList<ArrayList<Integer>> board, int limit, ArrayList<ArrayList<ArrayList<Integer>>> solutions) {
+		noOfSolutions = 0;
+		count = 0;
+		if (limit > 0)
+			solutions.clear();
+		boolean result = solve (findNumberPosition(START_NUMBER, board), board, 
+				getSpaces(board), getStartConfig(board), limit, solutions);
+		
+		return result;
+	}
+	
+	public boolean solve(ArrayList<ArrayList<Integer>> board, ArrayList<ArrayList<ArrayList<Integer>>> solutions) {
+		return solve(board, 0, solutions);
+	}
+	
+	private static <E> void shuffleArray(E[] ar) {
 		Random rnd = ThreadLocalRandom.current();
 		for (int i = ar.length - 1; i > 0; i--)
 	    {
 	      int index = rnd.nextInt(i + 1);
 	      // Simple swap
-	      Point a = ar[index];
+	      E a = ar[index];
 	      ar[index] = ar[i];
 	      ar[i] = a;
 	    }
@@ -214,7 +269,8 @@ public class BoardGenerator {
 	 * @param cols: number of columns on the board
 	 */
 	public void generate(int rows, int cols, int noOfPuzzles) {
-		for (int num = 0; num < noOfPuzzles; num++) {
+		ArrayList<ArrayList<ArrayList<Integer>>> puzzles = new ArrayList<>();
+		for (int n = 0; n < noOfPuzzles; n++) {
 			// create an empty puzzle
 			ArrayList<ArrayList<Integer>> puzzle = new ArrayList<>();
 			while (puzzle.size() < rows) {
@@ -226,30 +282,66 @@ public class BoardGenerator {
 			}
 
 			// TODO: generate -1 spaces to vary shape of puzzle?
-			// use solve() to find all possible solutions
+			// use solve() to find a possible solution
 		
 			int x = (int) (Math.random() * cols);
 			int y = (int) (Math.random() * rows);
 			puzzle.get(y).set(x, 1);
 			
-			solve(new Point(x, y), puzzle, getSpaces(puzzle), getStartConfig(puzzle), 1);
-		
-			String filename = "puzzles " + rows + " x " + cols + " - " + noOfPuzzles + ".txt";
-		
-			Path out = Paths.get(filename);
-
-			try {
-				Files.write(out, solutions, Charset.defaultCharset());
-			} catch (IOException e) {
-				// TODO Auto-generated catch block
-				e.printStackTrace();
+			solve(new Point(x, y), puzzle, getSpaces(puzzle), getStartConfig(puzzle), 1, puzzles);
+			
+			// empty this number of squares in the generated puzzle
+			int squares = rows * cols;
+			int emptySquares = (int) (Math.random() * 
+					((MAX_TO_REMOVE * squares) - (MIN_TO_REMOVE * squares)) + (MIN_TO_REMOVE * squares));
+			
+			ArrayList<ArrayList<Integer>> solution = puzzles.get(n);
+			Point[] numbers = new Point[squares];
+			
+			int index = 0;
+			for (int i = 0; i < rows; i++) {
+				for (int j = 0; j < cols; j++) {
+					numbers[index] = new Point(j, i);
+					index++;
+				}
 			}
-		
+			
+			shuffleArray(numbers);
+			
+			for (int i = 0; i < emptySquares; i++) {
+				Point p = numbers[i];
+				int num = solution.get(p.y).get(p.x);
+				// don't remove the first or last numbers
+				if (num > 1 && num < squares) {
+					solution.get(p.y).set(p.x, 0);
+				}
+			}
+			
 			count = 0;
 			noOfSolutions = 0;
-			
 		}
-		solutions.clear();
+		
+		ArrayList<String> solutionStrings = new ArrayList<>();
+		int noGenerated = 0;
+		for (ArrayList<ArrayList<Integer>> solution : puzzles) {
+			solve(solution, null);
+			if (noOfSolutions == 1) {
+				noGenerated++;
+				solutionStrings.add(toString(solution));
+			}
+		}
+		
+		String filename = "puzzles " + rows + " x " + cols + " - " + noGenerated + ".txt";
+		
+		Path out = Paths.get(filename);
+
+		System.out.println(noGenerated);
+		try {
+			Files.write(out, solutionStrings, Charset.defaultCharset());
+		} catch (IOException e) {
+			// TODO Auto-generated catch block
+			e.printStackTrace();
+		}
 		
 	}
 	/**
@@ -273,20 +365,25 @@ public class BoardGenerator {
 		System.out.println(toString(board));
 	}
 	
-	public int getStartNumber() {
-		return START_NUMBER;
-	}
 
 	public static void main(String[] args) {
 		BoardGenerator gen = new BoardGenerator();
 		
-		long startTime = System.nanoTime();
-		gen.generate(9, 1);	
+		/*long startTime = System.nanoTime();
+		gen.generate(4, 10);	
 		long endTime = System.nanoTime();
 
 		long duration = (endTime - startTime) / 1000000;
 		
-		System.out.println("Time taken: " + duration + "ms");
+		System.out.println("Time taken: " + duration + "ms");*/
+		
+		ArrayList<ArrayList<ArrayList<Integer>>> puzzles = new ArrayList<>();
+		puzzles = gen.readBoards("D:\\workspace\\Hidato\\src\\main\\resources\\file\\puzzles.txt");
+		
+		for (ArrayList<ArrayList<Integer>> puzzle : puzzles) {
+			gen.solve(puzzle, null);
+			System.out.println(gen.noOfSolutions);
+		}
 
 	}
 
